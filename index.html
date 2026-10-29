@@ -151,8 +151,8 @@ label.f{display:grid;gap:4px;font-size:13px;font-weight:700;color:var(--muted)}
 .panel .secttl .secno{font-size:16px}
 .panel .secttl .cnt{font-size:16px}
 .sechead:first-child{padding-top:0}
-.lobby{min-height:calc(100vh - 120px);display:grid;place-items:center;text-align:center}
-.lobby .hero{font-size:clamp(44px,8vw,120px)}
+.scrcenter{min-height:calc(100vh - 120px);display:grid;place-items:center;text-align:center}
+.scrcenter .hero{font-size:clamp(44px,8vw,120px)}
 .scr .ac .v{font-size:clamp(16px,1.6vw,22px)}
 .scr .lb li{padding:12px 16px;grid-template-columns:56px minmax(0,1fr) auto}
 .scr .lb .rk{font-size:26px}.scr .lb .pn{font-size:clamp(18px,2vw,26px)}.scr .lb .sc{font-size:clamp(22px,2.6vw,34px)}
@@ -204,6 +204,8 @@ const firebaseConfig = {
 
 <script>
 const $app=document.getElementById('app');
+/* このファイルの版。更新するたびに数字を上げる。司会者が新しい版を開くと、古い版を開いたままの端末は自動で再読み込みする */
+const APP_VER=6;
 const LT='ABCDEF';
 const TYPE={free:'自由回答',choice:'選択（正解あり）',vote:'選択（あとで正解決定）'};
 let db=null;
@@ -446,9 +448,9 @@ function formView(){
 function screenView(){
   const q=curQ(),ph=S.state.phase;let h=`<div class="scr ${ph==='open'?'open':''}">`;
   if(!q||ph==='lobby'){
-    h+=`<div class="lobby"><div class="hero pop">クイズ大会<br><b>まもなく開始です</b></div></div>`;
+    h+=`<div class="scrcenter"><div class="hero pop">クイズ大会<br><b>まもなく開始です</b></div></div>`;
   }else if(ph==='section'){
-    h+=`<div class="lobby">${secTitle(S.state.section||'')}</div>`;
+    h+=`<div class="scrcenter">${secTitle(S.state.section||'')}</div>`;
   }else if(ph==='board'){
     h+=`<div class="hero pop" style="font-size:clamp(28px,4vw,56px)">途中経過 <span class="muted" style="font-size:.5em">${esc(qLabel(q))} 終了時点</span></div>${leaderboard()}`;
   }else{
@@ -635,9 +637,19 @@ async function act(a,arg){
 
 /* ---------- 起動 ---------- */
 function parse(s,fb){try{return s?JSON.parse(s):fb}catch(e){return fb}}
+function syncVer(){
+  if(S.appVer===undefined)return;
+  if(isHost()&&S.appVer<APP_VER){db.ref('game/appVer').set(APP_VER).catch(()=>{});return}
+  if(S.appVer>APP_VER){
+    const k='quiz-reload-'+S.appVer;let tried=false;try{tried=!!sessionStorage.getItem(k);sessionStorage.setItem(k,'1')}catch(e){}
+    if(!tried){location.replace(location.pathname+'?v='+S.appVer+location.hash);return}
+    toast('新しい版があります。ページを再読み込みしてください');
+  }
+}
 function subscribe(){
   const fail=e=>{console.error(e);ME.err='データを読み込めませんでした。Firebase の Realtime Database とルールの設定を確認してください。';render()};
-  db.ref('host').on('value',s=>{S.host=s.val()||null;render()},fail);
+  db.ref('host').on('value',s=>{S.host=s.val()||null;syncVer();render()},fail);
+  db.ref('game/appVer').on('value',s=>{S.appVer=Number(s.val())||0;syncVer()},()=>{});
   db.ref('.info/serverTimeOffset').on('value',s=>{OFF=Number(s.val())||0});
   db.ref('game/state').on('value',s=>{S.state=s.val()||{phase:'lobby'};render()},fail);
   db.ref('game/questions').on('value',s=>{S.questions=parse(s.val(),[]);render()},fail);
