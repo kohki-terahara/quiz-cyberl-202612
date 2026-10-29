@@ -104,6 +104,21 @@ label.f{display:grid;gap:4px;font-size:13px;font-weight:700;color:var(--muted)}
 .chip.done{background:var(--okSoft)}
 .empty{padding:28px;text-align:center;border:2px dashed var(--line);border-radius:14px;color:var(--muted)}
 .note{font-size:13px;color:var(--muted)}
+.timer{display:grid;gap:6px}
+.timer .thead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.tbar{height:14px;border-radius:7px;background:var(--line);overflow:hidden}
+.tbar i{display:block;height:100%;width:100%;background:var(--blue);transition:width .12s linear,background-color .3s}
+.timer.warn .tbar i{background:var(--gold)}
+.timer.danger .tbar i,.timer.over .tbar i{background:var(--accent)}
+.tnum{font-family:var(--display);font-variant-numeric:tabular-nums;font-size:24px;line-height:1.2}
+.timer.over .tnum{color:var(--accent)}
+.timer .tnote{font-size:12px;color:var(--muted);font-weight:700}
+.scr .tbar{height:30px;border-radius:15px}
+.scr .tnum{font-size:clamp(34px,4.4vw,64px)}
+.scr .timer .tnote{font-size:clamp(14px,1.4vw,20px)}
+.tctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 12px;border-radius:12px;background:var(--soft)}
+.tctl input{width:84px}
+@media (prefers-reduced-motion:no-preference){.timer.danger .tnum{animation:beat 1s ease-in-out infinite}@keyframes beat{50%{transform:scale(1.08)}}}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:10px;font-weight:700;z-index:20;max-width:90%}
 /* プレイヤー */
 .pv{max-width:560px;margin:0 auto;display:grid;gap:14px}
@@ -175,6 +190,7 @@ const TYPE={free:'自由回答',choice:'選択（正解あり）',vote:'選択�
 let db=null;
 const ME={uid:null,ready:false,setup:false,err:null};
 const S={host:undefined,state:{phase:'lobby'},questions:[],results:{},players:{}};
+let OFF=0;const now=()=>Date.now()+OFF; /* Firebaseのサーバー時刻に合わせた現在時刻 */
 let tab='run',editing=null,editImg=null,uploading=false,draft=null,armed=null,armTimer=null,busy=false;
 const vals={},IMG={};
 
@@ -250,6 +266,24 @@ function leaderboard({highlight=null}={}){
 }
 const answeredCount=q=>playerList().filter(p=>ansOf(p,q.id)).length;
 function phaseChip(){const p=S.state.phase;const t={lobby:'待機中',open:'回答受付中',closed:'締切・回答一覧',revealed:'正解発表',board:'途中経過'}[p]||p;return `<span class="phase ${p}">${t}</span>`}
+/* ---------- タイマー（目安の表示だけ。0になっても回答は締め切らない） ---------- */
+const timerOn=()=>S.state.phase==='open'&&S.state.timerStart&&S.state.timerDur>0;
+function timerHtml(note=''){
+  if(!timerOn())return '';
+  return `<div class="timer" data-timer><div class="thead"><span class="tnum">--</span><span class="tnote" data-tnote="${esc(note)}"></span></div><div class="tbar"><i></i></div></div>`;
+}
+function tick(){
+  const els=document.querySelectorAll('[data-timer]');if(!els.length)return;
+  const dur=Number(S.state.timerDur)||0,rem=dur-(now()-Number(S.state.timerStart))/1000;
+  const r=Math.max(0,Math.min(dur,rem)),pct=dur?r/dur*100:0,over=rem<=0;
+  els.forEach(el=>{
+    el.querySelector('.tbar i').style.width=pct+'%';
+    el.querySelector('.tnum').textContent=over?'時間切れ':`${Math.ceil(r)}秒`;
+    const n=el.querySelector('.tnote');n.textContent=over?n.dataset.tnote:`制限時間 ${dur}秒`;
+    el.classList.toggle('over',over);el.classList.toggle('danger',!over&&r<=5);el.classList.toggle('warn',!over&&r>5&&r<=Math.min(10,dur/3));
+  });
+}
+setInterval(tick,100);
 const qrBox=size=>`<div class="qr" data-qr="${esc(joinUrl())}" data-size="${size}"></div>`;
 
 /* ---------- 司会者 ---------- */
@@ -280,6 +314,9 @@ function runView(){
     const r=S.results[q.id];
     main+=qBlock(q,{tally:ph!=='open'&&q.type!=='free',win:ph==='revealed'&&r?r.answerIndex:null});
     if(ph==='open'){
+      const run=!!timerOn();
+      main+=`${timerHtml('締切ボタンを押すまで回答を受け付けます')}<div class="tctl"><span class="label">タイマー</span><input type="number" id="t-sec" data-keep min="1" step="1" aria-label="制限時間（秒）" value="${esc(vals['t-sec']??(q.time||30))}"><span>秒</span>
+      <button class="small go" data-act="tstart">${run?'最初からスタート':'タイマースタート'}</button>${run?`<button class="small" data-act="tadd">+10秒</button><button class="small ghost" data-act="tstop">止めて消す</button>`:''}</div>`;
       main+=`<div class="row"><span class="count">${answeredCount(q)} / ${ps.length}</span><span class="muted">人が回答済み</span></div>
       <div class="chips">${ps.map(p=>`<span class="chip ${ansOf(p,q.id)?'done':''}">${ansOf(p,q.id)?'✓ ':''}${esc(p.name)}</span>`).join('')}</div>
       <div class="row"><button class="primary" data-act="close">回答を締め切る</button></div>`;
@@ -355,7 +392,9 @@ function formView(){
     h+=`<label class="f">選択肢（1行に1つ・2〜6個）<textarea id="f-opts" data-keep data-rerender placeholder="例：&#10;赤チーム&#10;白チーム">${esc(vals['f-opts']||'')}</textarea></label>`;
     if(t==='choice')h+=`<label class="f">正解<select id="f-correct" data-keep>${opts.map((o,i)=>`<option value="${i}" ${String(vals['f-correct']??'0')===String(i)?'selected':''}>${LT[i]||'?'}. ${esc(o)}</option>`).join('')}</select></label>`;
   }
-  h+=`<label class="f" style="max-width:160px">配点<input type="number" id="f-points" data-keep min="0" step="1" value="${esc(vals['f-points']??'10')}"></label>
+  h+=`<div class="row" style="align-items:end"><label class="f" style="max-width:160px">配点<input type="number" id="f-points" data-keep min="0" step="1" value="${esc(vals['f-points']??'10')}"></label>
+  <label class="f" style="max-width:200px">制限時間の目安（秒）<input type="number" id="f-time" data-keep min="1" step="1" value="${esc(vals['f-time']??'30')}"></label></div>
+  <p class="note" style="margin:0">タイマーは出題後に司会者が「タイマースタート」を押すと動き出します。秒数は出題中にも変えられます。</p>
   <div class="row"><button class="primary" data-act="save" ${uploading?'disabled':''}>保存</button><button class="ghost" data-act="cancel">閉じる</button>${editing!=='new'?armBtn('del',editing,'この問題を削除','ghost'):''}</div>`;
   return h;
 }
@@ -372,7 +411,7 @@ function screenView(){
   }else{
     const r=S.results[q.id];
     h+=`<div class="panel pop" style="gap:18px">${qBlock(q,{tally:ph!=='open'&&q.type!=='free',win:ph==='revealed'&&r?r.answerIndex:null})}</div>`;
-    if(ph==='open')h+=`<div class="row"><span class="count">回答 ${answeredCount(q)} / ${playerList().length}</span></div>`;
+    if(ph==='open')h+=`${timerHtml('まだ回答・修正できます')}<div class="row"><span class="count">回答 ${answeredCount(q)} / ${playerList().length}</span></div>`;
     if(ph==='revealed')h+=`<div class="reveal pop"><span class="label">正解</span><span class="big">${esc(correctLabel(q,r))}</span><span class="muted">正解者 ${r?r.correct.length:0}人</span></div>`;
     if(ph!=='open')h+=answersGrid(q,{marks:ph==='revealed'});
   }
@@ -394,7 +433,7 @@ function playerView(){
     return h+`<div class="row"><button class="small ghost" data-act="rename">名前を変える</button></div></div>`;
   }
   const a=ansOf(me,q.id),r=S.results[q.id];
-  h+=`<div class="panel"><div class="row">${phaseChip()}</div>${ph==='open'?qBlock(q,{showPick:q.type!=='free'?{sel:a?Number(a.v):null}:null}):qBlock(q,{tally:q.type!=='free',win:ph==='revealed'&&r?r.answerIndex:null})}`;
+  h+=`<div class="panel"><div class="row">${phaseChip()}</div>${ph==='open'?timerHtml('締切まで回答・修正できます'):''}${ph==='open'?qBlock(q,{showPick:q.type!=='free'?{sel:a?Number(a.v):null}:null}):qBlock(q,{tally:q.type!=='free',win:ph==='revealed'&&r?r.answerIndex:null})}`;
   if(ph==='open'){
     if(q.type==='free')h+=`<label class="f">あなたの回答<input type="text" id="p-ans" data-keep maxlength="60" value="${esc(vals['p-ans']??(a?a.v:''))}"></label><button class="primary" data-act="submit">${a?'回答を更新':'回答する'}</button>`;
     h+=a?`<p class="note" style="margin:0">回答済み：<b>${esc(ansText(q,a))}</b>（締切まで変更できます）</p>`:`<p class="note" style="margin:0">${q.type==='free'?'入力して「回答する」を押してください。':'選択肢をタップすると回答になります。'}</p>`;
@@ -430,6 +469,7 @@ function render(){
     const n=Number(el.dataset.size)||160;
     new QRCode(el,{text:el.dataset.qr,width:n,height:n,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   });
+  tick();
   if(fid){const el=document.getElementById(fid);if(el){el.focus({preventScroll:true});if(ss&&el.setSelectionRange)try{el.setSelectionRange(ss[0],ss[1])}catch(e){}}}
 }
 window.addEventListener('hashchange',render);
@@ -462,7 +502,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(
 function openEditor(id){
   editing=id;const q=id==='new'?null:qById(id);
   vals['f-type']=q?q.type:'free';vals['f-text']=q?q.text:'';vals['f-opts']=q&&q.options?q.options.join('\n'):'';
-  vals['f-correct']=q&&q.correctIndex!=null?String(q.correctIndex):'0';vals['f-points']=q?String(q.points):'10';
+  vals['f-correct']=q&&q.correctIndex!=null?String(q.correctIndex):'0';vals['f-points']=q?String(q.points):'10';vals['f-time']=q&&q.time?String(q.time):'30';
   editImg=q?q.imageId||null:null;render();
 }
 
@@ -486,8 +526,15 @@ async function act(a,arg){
       else if(armed==='start:'+arg){armed=null}
       return W(async()=>{draft=null;const up={};
         if(S.results[arg]){const res={...S.results};delete res[arg];up['game/results']=JSON.stringify(res);for(const p of playerList())up[`players/${p.uid}/answers/${arg}`]=null}
-        up['game/state']={...S.state,phase:'open',qid:arg,at:Date.now()};
+        delete vals['t-sec'];
+        up['game/state']={...S.state,phase:'open',qid:arg,at:Date.now(),timerStart:null,timerDur:null};
         await db.ref().update(up)})}
+    case 'tstart':{const q=curQ();const sec=Math.round(Number(vals['t-sec']??(q&&q.time)??30));
+      if(!(sec>=1&&sec<=3600))return toast('秒数は1〜3600の数字で入れてください');
+      return W(()=>setState({timerStart:now(),timerDur:sec}))}
+    case 'tadd':if(!timerOn())return;return W(()=>{const rem=Number(S.state.timerDur)-(now()-Number(S.state.timerStart))/1000;
+      return rem>0?setState({timerDur:Number(S.state.timerDur)+10}):setState({timerStart:now(),timerDur:10})});
+    case 'tstop':return W(()=>setState({timerStart:null,timerDur:null}));
     case 'close':return W(()=>setState({phase:'closed'}));
     case 'reopen':return W(()=>setState({phase:'open'}));
     case 'accept':{if(draft.accepted.has(arg))draft.accepted.delete(arg);else draft.accepted.add(arg);
@@ -518,7 +565,8 @@ async function act(a,arg){
     case 'save':{
       const type=vals['f-type']||'free',text=(vals['f-text']||'').trim(),points=Math.max(0,Math.round(Number(vals['f-points'])||0));
       if(!text&&!editImg)return toast('問題文か画像を入れてください');
-      const q={id:editing==='new'?rid('q'):editing,type,text,points};
+      const time=Math.max(1,Math.round(Number(vals['f-time'])||30));
+      const q={id:editing==='new'?rid('q'):editing,type,text,points,time};
       if(editImg)q.imageId=editImg;
       if(type!=='free'){const o=(vals['f-opts']||'').split('\n').map(s=>s.trim()).filter(Boolean);
         if(o.length<2||o.length>6)return toast('選択肢は2〜6個にしてください');q.options=o;
@@ -533,6 +581,7 @@ function parse(s,fb){try{return s?JSON.parse(s):fb}catch(e){return fb}}
 function subscribe(){
   const fail=e=>{console.error(e);ME.err='データを読み込めませんでした。Firebase の Realtime Database とルールの設定を確認してください。';render()};
   db.ref('host').on('value',s=>{S.host=s.val()||null;render()},fail);
+  db.ref('.info/serverTimeOffset').on('value',s=>{OFF=Number(s.val())||0});
   db.ref('game/state').on('value',s=>{S.state=s.val()||{phase:'lobby'};render()},fail);
   db.ref('game/questions').on('value',s=>{S.questions=parse(s.val(),[]);render()},fail);
   db.ref('game/results').on('value',s=>{S.results=parse(s.val(),{});render()},fail);
