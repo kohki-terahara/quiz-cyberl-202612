@@ -133,7 +133,16 @@ label.f{display:grid;gap:4px;font-size:13px;font-weight:700;color:var(--muted)}
 .scr .qtext{font-size:clamp(24px,3.6vw,48px)}
 .scr .opt{font-size:clamp(18px,2vw,28px);padding:16px 18px}
 .scr .opt .lt{width:44px;height:44px;font-size:22px}
-.scr .qimg{max-height:46vh}
+.scr .qimg{max-height:40vh;width:100%;object-fit:contain;border:0;border-radius:0;background:transparent}
+.scr.open .qimg{max-height:calc(100vh - 300px);min-height:50vh}
+.scr.open .panel{padding:12px 18px;gap:10px}
+.sec{font-family:var(--display);font-size:14px;padding:2px 12px;border-radius:8px;background:var(--ink);color:var(--bg)}
+.scr .sec{font-size:clamp(16px,1.8vw,26px);padding:4px 16px}
+.scr .qno{font-size:clamp(16px,1.8vw,26px)}
+.sechead{font-family:var(--display);font-size:15px;padding:6px 2px 0;border-bottom:2px solid var(--ink)}
+.sechead:first-child{padding-top:0}
+.lobby{min-height:calc(100vh - 120px);display:grid;place-items:center;text-align:center}
+.lobby .hero{font-size:clamp(44px,8vw,120px)}
 .scr .ac .v{font-size:clamp(16px,1.6vw,22px)}
 .scr .lb li{padding:12px 16px;grid-template-columns:56px minmax(0,1fr) auto}
 .scr .lb .rk{font-size:26px}.scr .lb .pn{font-size:clamp(18px,2vw,26px)}.scr .lb .sc{font-size:clamp(22px,2.6vw,34px)}
@@ -206,7 +215,16 @@ async function W(fn){if(busy)return;busy=true;try{await fn()}catch(e){console.er
 
 /* ---------- 派生データ ---------- */
 const qById=id=>S.questions.find(q=>q.id===id);
-const qNum=id=>S.questions.findIndex(q=>q.id===id)+1;
+/* セクション：問題ごとの任意のタイトル。番号はセクション内で 問題1, 問題2… と数える */
+const secOf=q=>String(q&&q.section||'').trim();
+function qIndexInSec(id){const q=qById(id);if(!q)return 0;const s=secOf(q);let n=0;for(const x of S.questions){if(secOf(x)===s)n++;if(x.id===id)return n}return 0}
+const qLabel=q=>`${secOf(q)?`[${secOf(q)}] `:''}問題${qIndexInSec(q.id)}`;
+const sections=()=>[...new Set(S.questions.map(secOf).filter(Boolean))];
+function groupedList(rowFn){
+  let prev=null,h='';
+  S.questions.forEach((q,i)=>{const s=secOf(q);if(s!==prev){h+=`<div class="sechead">${s?esc(s):'セクションなし'}</div>`;prev=s}h+=rowFn(q,i)});
+  return h;
+}
 const curQ=()=>S.state.qid?qById(S.state.qid):null;
 const playerList=()=>Object.entries(S.players).map(([uid,p])=>({uid,...p})).filter(p=>p.name).sort((a,b)=>(a.joinedAt||0)-(b.joinedAt||0));
 const ansOf=(p,qid)=>p.answers&&p.answers[qid];
@@ -236,7 +254,7 @@ function imgTag(id,style=''){const s=imgSrc(id);return s?`<img class="qimg" src=
 
 /* ---------- 共通パーツ ---------- */
 function qBlock(q,{showPick=null,tally=false,win=null}={}){
-  let h=`<div class="row"><span class="qno">第${qNum(q.id)}問</span><span class="tag ${q.type==='vote'?'vote':''}">${TYPE[q.type]}</span><span class="tag">${Number(q.points)||0}点</span></div>`;
+  let h=`<div class="row">${secOf(q)?`<span class="sec">${esc(secOf(q))}</span>`:''}<span class="qno">問題${qIndexInSec(q.id)}</span><span class="tag ${q.type==='vote'?'vote':''}">${TYPE[q.type]}</span><span class="tag">${Number(q.points)||0}点</span></div>`;
   if(q.text)h+=`<div class="qtext">${esc(q.text)}</div>`;
   if(q.imageId)h+=imgTag(q.imageId);
   if(q.type!=='free'){
@@ -330,12 +348,12 @@ function runView(){
     if(ph==='board')main+=`<div class="row"><span class="muted">スクリーンにリーダーボードを表示中</span>${nextBtn(q)}</div>`;
   }
   main+=`</div>`;
-  main+=`<div class="panel"><span class="label">問題一覧</span><div class="qlist">`+(S.questions.map((x,i)=>{
+  main+=`<div class="panel"><span class="label">問題一覧</span><div class="qlist">`+(groupedList((x,i)=>{
     const done=!!S.results[x.id],cur=q&&x.id===q.id&&ph!=='lobby';
-    return `<div class="qi ${cur?'cur':''} ${done?'done':''}"><span class="qno">${i+1}</span><span class="t">${esc(x.text||'（画像の問題）')} <span class="tag">${TYPE[x.type]}</span>${x.imageId?' <span class="tag">画像</span>':''}</span>
-    ${done&&!cur?armBtn('start',x.id,'再出題','small ghost'):`<button class="small ${cur?'ghost':'go'}" data-act="start" data-arg="${x.id}" ${ph==='open'&&!cur?'disabled':''}>出題</button>`}</div>`}).join('')||`<div class="empty">問題がありません</div>`)+`</div></div>`;
+    return `<div class="qi ${cur?'cur':''} ${done?'done':''}"><span class="qno">${qIndexInSec(x.id)}</span><span class="t">${esc(x.text||'（画像の問題）')} <span class="tag">${TYPE[x.type]}</span>${x.imageId?' <span class="tag">画像</span>':''}</span>
+    ${done&&!cur?armBtn('start',x.id,'再出題','small ghost'):`<button class="small ${cur?'ghost':'go'}" data-act="start" data-arg="${x.id}" ${ph==='open'&&!cur?'disabled':''}>出題</button>`}</div>`})||`<div class="empty">問題がありません</div>`)+`</div></div>`;
 
-  let side=`<div class="panel"><span class="label">参加用QRコード</span><div class="joinbox">${qrBox(140)}<div style="min-width:0;flex:1;display:grid;gap:6px"><span class="note">参加者はこのQRコードを読み取り、名前を入れるだけで参加できます。</span><span class="url">${esc(joinUrl())}</span></div></div></div>`;
+  let side=`<div class="panel"><span class="label">参加用QRコード</span><div class="joinbox">${qrBox(140)}<div style="min-width:0;flex:1;display:grid;gap:6px"><span class="note">参加者はこのQRコードを読み取り、名前を入れるだけで参加できます。スクリーンには表示されないので、この画面を見せるか、URLを共有してください。</span><span class="url">${esc(joinUrl())}</span></div></div></div>`;
   side+=`<div class="panel"><div class="row"><span class="label">リーダーボード</span><span class="muted" style="margin-left:auto">${ps.length}人</span></div>${leaderboard()}
   <div class="row">${ph!=='board'?`<button class="small ghost" data-act="board">スクリーンに表示</button>`:''}${ph!=='lobby'?`<button class="small ghost" data-act="lobby">待機画面に戻す</button>`:''}</div></div>`;
   side+=`<div class="panel"><span class="label">参加者の管理</span>
@@ -344,7 +362,7 @@ function runView(){
   <p class="note" style="margin:0">プロジェクターには、別の端末で <span class="url">${esc(joinUrl())}#screen</span> を開いて映してください。</p></div>`;
   return `<div class="cols"><div style="display:grid;gap:16px;min-width:0">${main}</div><div style="display:grid;gap:16px;min-width:0">${side}</div></div>`;
 }
-function nextBtn(q){const i=S.questions.findIndex(x=>x.id===q.id);const n=S.questions[i+1];return n?`<button class="primary" data-act="start" data-arg="${n.id}">次の問題へ（第${i+2}問）</button>`:`<span class="tag">最後の問題です</span>`}
+function nextBtn(q){const i=S.questions.findIndex(x=>x.id===q.id);const n=S.questions[i+1];return n?`<button class="primary" data-act="start" data-arg="${n.id}">次の問題へ（${esc(qLabel(n))}）</button>`:`<span class="tag">最後の問題です</span>`}
 
 function ensureDraft(q){
   if(draft&&draft.qid===q.id)return;
@@ -375,8 +393,8 @@ function judgeView(q){
 /* 問題作成 */
 function editorView(){
   let h=`<div class="cols"><div class="panel" style="min-width:0"><div class="row"><span class="label">問題一覧</span><button class="small go" data-act="new" style="margin-left:auto">＋ 問題を追加</button></div><div class="qlist">`;
-  h+=S.questions.map((q,i)=>`<div class="qi ${editing===q.id?'cur':''}"><span class="qno">${i+1}</span><span class="t">${esc(q.text||'（画像の問題）')}<br><span class="tag">${TYPE[q.type]}</span> <span class="tag">${q.points}点</span>${q.imageId?' <span class="tag">画像</span>':''}</span>
-    <span class="row"><button class="small ghost" data-act="up" data-arg="${q.id}" ${i===0?'disabled':''} aria-label="上へ">↑</button><button class="small ghost" data-act="down" data-arg="${q.id}" ${i===S.questions.length-1?'disabled':''} aria-label="下へ">↓</button><button class="small" data-act="edit" data-arg="${q.id}">編集</button></span></div>`).join('')||`<div class="empty">まだ問題がありません。「＋ 問題を追加」から作りましょう。</div>`;
+  h+=groupedList((q,i)=>`<div class="qi ${editing===q.id?'cur':''}"><span class="qno">${qIndexInSec(q.id)}</span><span class="t">${esc(q.text||'（画像の問題）')}<br><span class="tag">${TYPE[q.type]}</span> <span class="tag">${q.points}点</span>${q.imageId?' <span class="tag">画像</span>':''}</span>
+    <span class="row"><button class="small ghost" data-act="up" data-arg="${q.id}" ${i===0?'disabled':''} aria-label="上へ">↑</button><button class="small ghost" data-act="down" data-arg="${q.id}" ${i===S.questions.length-1?'disabled':''} aria-label="下へ">↓</button><button class="small" data-act="edit" data-arg="${q.id}">編集</button></span></div>`)||`<div class="empty">まだ問題がありません。「＋ 問題を追加」から作りましょう。</div>`;
   return h+`</div></div><div class="panel" style="min-width:0">${formView()}</div></div>`;
 }
 function formView(){
@@ -384,6 +402,8 @@ function formView(){
   <div class="note">・<b>自由回答</b>：参加者が文字で答え、司会者が正解の回答をタップして判定します。<br>・<b>選択（正解あり）</b>：作成時に正解を決めておく選択問題です。<br>・<b>選択（あとで正解決定）</b>：対決の勝者予想など、締切後に司会者が正解を選びます。</div>`;
   const t=vals['f-type']||'free';const opts=(vals['f-opts']||'').split('\n').map(s=>s.trim()).filter(Boolean);
   let h=`<span class="label">${editing==='new'?'新しい問題':'問題を編集'}</span>
+  <label class="f">セクション（例：画像当てクイズ。空欄でもOK）<input type="text" id="f-sec" data-keep list="sec-list" maxlength="30" placeholder="例：早押しクイズ" value="${esc(vals['f-sec']||'')}"></label>
+  <datalist id="sec-list">${sections().map(s=>`<option value="${esc(s)}"></option>`).join('')}</datalist>
   <label class="f">問題の種類<select id="f-type" data-keep data-rerender>${Object.entries(TYPE).map(([k,v])=>`<option value="${k}" ${t===k?'selected':''}>${v}</option>`).join('')}</select></label>
   <label class="f">問題文<textarea id="f-text" data-keep placeholder="例：この写真の山の名前は？">${esc(vals['f-text']||'')}</textarea></label>
   <div style="display:grid;gap:6px"><span class="label">画像（任意）</span>${editImg?`${imgTag(editImg,'max-height:180px')}<div class="row"><button class="small ghost" data-act="img-remove">画像を外す</button></div>`:''}
@@ -401,13 +421,11 @@ function formView(){
 
 /* ---------- スクリーン ---------- */
 function screenView(){
-  const q=curQ(),ph=S.state.phase;let h=`<div class="scr">`;
+  const q=curQ(),ph=S.state.phase;let h=`<div class="scr ${ph==='open'?'open':''}">`;
   if(!q||ph==='lobby'){
-    const ps=playerList();
-    h+=`<div class="joinbox" style="align-items:flex-start;gap:32px"><div style="flex:1;min-width:260px;display:grid;gap:16px"><div class="hero pop">クイズ大会<br><b>まもなく開始</b></div><p class="count" style="margin:0">QRコードを読み取って<br>名前を入れてね</p><span class="url" style="font-size:16px">${esc(joinUrl())}</span></div>${qrBox(260)}</div>
-    <div class="row"><span class="count">${ps.length}人</span><span class="muted">が参加中</span></div><div class="chips">${ps.map(p=>`<span class="chip" style="font-size:20px;padding:6px 16px">${esc(p.name)}</span>`).join('')}</div>`;
+    h+=`<div class="lobby"><div class="hero pop">クイズ大会<br><b>まもなく開始です</b></div></div>`;
   }else if(ph==='board'){
-    h+=`<div class="hero pop" style="font-size:clamp(28px,4vw,56px)">途中経過 <span class="muted" style="font-size:.5em">第${qNum(q.id)}問終了時点</span></div>${leaderboard()}`;
+    h+=`<div class="hero pop" style="font-size:clamp(28px,4vw,56px)">途中経過 <span class="muted" style="font-size:.5em">${esc(qLabel(q))} 終了時点</span></div>${leaderboard()}`;
   }else{
     const r=S.results[q.id];
     h+=`<div class="panel pop" style="gap:18px">${qBlock(q,{tally:ph!=='open'&&q.type!=='free',win:ph==='revealed'&&r?r.answerIndex:null})}</div>`;
@@ -481,7 +499,7 @@ const saveResults=r=>db.ref('game/results').set(JSON.stringify(r));
 function arm(k){if(armed===k){armed=null;clearTimeout(armTimer);return true}armed=k;clearTimeout(armTimer);armTimer=setTimeout(()=>{armed=null;render()},3500);render();return false}
 
 function shrink(file){return new Promise((res,rej)=>{const fr=new FileReader();fr.onerror=rej;fr.onload=()=>{const im=new Image();im.onerror=rej;im.onload=()=>{
-  const k=Math.min(1,1200/Math.max(im.width,im.height));const w=Math.round(im.width*k),h=Math.round(im.height*k);
+  const k=Math.min(1,1920/Math.max(im.width,im.height));const w=Math.round(im.width*k),h=Math.round(im.height*k);
   const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.fillStyle='#ffffff';x.fillRect(0,0,w,h);x.drawImage(im,0,0,w,h);
   res(c.toDataURL('image/jpeg',0.82))};im.src=fr.result};fr.readAsDataURL(file)})}
 
@@ -500,7 +518,9 @@ document.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){if(e
 document.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b||b.disabled)return;act(b.dataset.act,b.dataset.arg)});
 
 function openEditor(id){
+  const last=(editing&&qById(editing))||S.questions[S.questions.length-1]; /* 直前に編集していた問題 */
   editing=id;const q=id==='new'?null:qById(id);
+  vals['f-sec']=q?secOf(q):secOf(last); /* 新しい問題は直前のセクションを引き継ぐ */
   vals['f-type']=q?q.type:'free';vals['f-text']=q?q.text:'';vals['f-opts']=q&&q.options?q.options.join('\n'):'';
   vals['f-correct']=q&&q.correctIndex!=null?String(q.correctIndex):'0';vals['f-points']=q?String(q.points):'10';vals['f-time']=q&&q.time?String(q.time):'30';
   editImg=q?q.imageId||null:null;render();
@@ -568,10 +588,16 @@ async function act(a,arg){
       const time=Math.max(1,Math.round(Number(vals['f-time'])||30));
       const q={id:editing==='new'?rid('q'):editing,type,text,points,time};
       if(editImg)q.imageId=editImg;
+      const sec=(vals['f-sec']||'').trim().slice(0,30);if(sec)q.section=sec;
       if(type!=='free'){const o=(vals['f-opts']||'').split('\n').map(s=>s.trim()).filter(Boolean);
         if(o.length<2||o.length>6)return toast('選択肢は2〜6個にしてください');q.options=o;
         if(type==='choice')q.correctIndex=Math.min(Number(vals['f-correct']||0),o.length-1)}
-      const l=[...S.questions];const i=l.findIndex(x=>x.id===q.id);if(i>=0)l[i]=q;else l.push(q);
+      let l=[...S.questions];const i=l.findIndex(x=>x.id===q.id);
+      if(i>=0&&secOf(l[i])===sec)l[i]=q;
+      else{ /* 新規・セクション変更：同じセクションの最後の問題の後ろに置く（なければ末尾） */
+        l=l.filter(x=>x.id!==q.id);let at=-1;l.forEach((x,j)=>{if(secOf(x)===sec)at=j});
+        if(at>=0)l.splice(at+1,0,q);else l.push(q);
+      }
       return W(async()=>{await saveQuestions(l);editing=q.id;toast('保存しました')})}
   }
 }
